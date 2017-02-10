@@ -14,7 +14,7 @@
 
 using System;
 using System.Collections.Generic;
-using Windows.UI.Composition;
+using System.Threading.Tasks;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Hosting;
 using Windows.UI.Xaml.Media.Animation;
@@ -24,25 +24,24 @@ namespace CompositionSampleGallery
 {
     public sealed partial class NavigationFlowSourcePage : Page
     {
-        private Compositor _compositor;
-        private static int s_persistedItemIndex;
+        private readonly List<string> _items = new List<string>();
+        private static string _position = "";
+        private static int _index;
 
         public NavigationFlowSourcePage()
         {
             InitializeComponent();
 
+            var compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
 
-            _compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
-
-            var listItems = new List<string>();
             for (int i = 0; i < 300; i++)
             {
-                listItems.Add($"Item {i}");
+                _items.Add($"Item {i}");
             }
-            ItemsGridView.ItemsSource = listItems;
+            ItemsGridView.ItemsSource = _items;
 
             // Set a fade in animation when this page enters the scene
-            var fadeInAnimation = _compositor.CreateScalarKeyFrameAnimation();
+            var fadeInAnimation = compositor.CreateScalarKeyFrameAnimation();
             fadeInAnimation.Target = "Opacity";
             fadeInAnimation.Duration = TimeSpan.FromSeconds(0.3);
             fadeInAnimation.InsertKeyFrame(0, 0);
@@ -53,7 +52,7 @@ namespace CompositionSampleGallery
             ElementCompositionPreview.SetImplicitShowAnimation(this, fadeInAnimation);
 
             // Set a fade out animation when this page exits the scene
-            var fadeOutAnimation = _compositor.CreateScalarKeyFrameAnimation();
+            var fadeOutAnimation = compositor.CreateScalarKeyFrameAnimation();
             fadeOutAnimation.Target = "Opacity";
             fadeOutAnimation.Duration = TimeSpan.FromSeconds(0.3);
             fadeOutAnimation.InsertKeyFrame(0, 1);
@@ -67,33 +66,39 @@ namespace CompositionSampleGallery
             base.OnNavigatedTo(e);
             if (e.NavigationMode == NavigationMode.Back)
             {
-                ItemsGridView.Loaded += async (o_, e_) =>
+                ItemsGridView.Loaded += async (o, args) =>
                 {
                     var connectedAnimation = ConnectedAnimationService
                         .GetForCurrentView()
                         .GetAnimation("BorderDest");
+
                     if (connectedAnimation != null)
                     {
-                        var item = ItemsGridView.Items[s_persistedItemIndex];
-                        ItemsGridView.ScrollIntoView(item);
-                        await ItemsGridView.TryStartConnectedAnimationAsync(
-                            connectedAnimation,
-                            item,
-                            "BorderSource"
-                        );
+                        await ListViewPersistenceHelper.SetRelativeScrollPositionAsync(ItemsGridView, _position, k => Task.FromResult((object)k).AsAsyncOperation());
+
+                        // Magic delay here...
+                        await Task.Delay(1);
+
+                        await ItemsGridView.TryStartConnectedAnimationAsync(connectedAnimation, ItemsGridView.Items[_index], "BorderSource");
                     }
                 };
             }
         }
 
+        protected override void OnNavigatingFrom(NavigatingCancelEventArgs e)
+        {
+            _position = ListViewPersistenceHelper.GetRelativeScrollPosition(ItemsGridView, o => o.ToString());
+
+            base.OnNavigatingFrom(e);
+        }
+
         private void ItemsGridView_ItemClick(object sender, ItemClickEventArgs e)
         {
+            _index = ItemsGridView.Items.IndexOf(e.ClickedItem);
             ConnectedAnimationService.GetForCurrentView().DefaultDuration = TimeSpan.FromSeconds(0.5);
-
-            s_persistedItemIndex = ItemsGridView.Items.IndexOf(e.ClickedItem);
             ItemsGridView.PrepareConnectedAnimation("BorderSource", e.ClickedItem, "BorderSource");
 
-            Frame.Navigate(typeof(NavigationFlowDestinationPage), s_persistedItemIndex);
+            Frame.Navigate(typeof(NavigationFlowDestinationPage), _index);
         }
     }
 }
